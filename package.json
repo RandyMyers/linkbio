@@ -1,0 +1,35 @@
+{
+  "name": "linkbio-server",
+  "version": "1.0.0",
+  "private": true,
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node --watch app.js",
+    "seed:socials": "node scripts/seedSocialPlatforms.js",
+    "seed:gateways": "node scripts/seedGatewayCredentials.js",
+    "seed:payment-methods": "node scripts/seedPaymentMethods.js",
+    "migrate:blocks": "node scripts/migrate-profile-blocks.js",
+    "migrate:blocks:dry": "node scripts/migrate-profile-blocks.js --dry-run",
+    "test:proration": "node scripts/testSubscriptionProration.js",
+    "backfill:subscriptions": "node scripts/backfillSubscriptionEvents.js",
+    "backfill:subscriptions:dry": "node scripts/backfillSubscriptionEvents.js --dry-run"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cloudinary": "^2.5.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-async-errors": "^3.1.1",
+    "express-fileupload": "^1.5.1",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^7.8.8",
+    "morgan": "^1.10.0",
+    "nodemon": "^3.1.14",
+    "stripe": "^22.1.1"
+  }
+}
