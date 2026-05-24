@@ -36,6 +36,38 @@ const ogController = require('./controllers/ogController');
 const robotsController = require('./controllers/robotsController');
 const sitemapController = require('./controllers/sitemapController');
 
+/** Browser origins allowed to call this API (credentials / cookies). */
+const CORS_ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://courageous-cocada-20fd5a.netlify.app',
+];
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    const normalized = String(origin).replace(/\/$/, '');
+    if (CORS_ALLOWED_ORIGINS.includes(normalized)) {
+      callback(null, normalized);
+      return;
+    }
+    callback(null, false);
+  },
+  credentials: true,
+  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'X-LinkBio-Profile-Id',
+    'Accept',
+  ],
+  optionsSuccessStatus: 204,
+};
+
 function createApp() {
   const app = express();
 
@@ -43,28 +75,12 @@ function createApp() {
     app.set('trust proxy', config.trustProxy);
   }
 
+  app.use(cors(corsOptions));
+  app.options('*', cors(corsOptions));
   app.use(requestId);
   app.use(
     helmet({
       crossOriginResourcePolicy: { policy: 'cross-origin' },
-    }),
-  );
-  app.use(
-    cors({
-      origin: (origin, callback) => {
-        // Same-origin / curl / server-to-server — no Origin header
-        if (!origin) {
-          callback(null, true);
-          return;
-        }
-        const normalized = String(origin).replace(/\/$/, '');
-        if (config.corsAllowedOrigins.includes(normalized)) {
-          callback(null, true);
-          return;
-        }
-        callback(null, false);
-      },
-      credentials: true,
     }),
   );
 

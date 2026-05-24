@@ -16,20 +16,6 @@ function optional(name, fallback = '') {
 const jwtSecret = required('JWT_SECRET', 'dev-only-change-me-linkbio');
 const clientOrigin = (process.env.CLIENT_ORIGIN || 'http://localhost:3000').replace(/\/$/, '');
 
-function parseCorsAllowedOrigins() {
-  const always = [
-    'http://localhost:3000',
-    'http://localhost:3001',
-  ];
-  const additional = optional('ADDITIONAL_CORS_ORIGINS', '')
-    .split(',')
-    .map((o) => o.trim().replace(/\/$/, ''))
-    .filter(Boolean);
-  return [...new Set([clientOrigin, ...always, ...additional])];
-}
-
-const corsAllowedOrigins = parseCorsAllowedOrigins();
-
 module.exports = {
   port: Number(process.env.PORT || 4000),
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -37,7 +23,6 @@ module.exports = {
   jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '14d',
   clientOrigin,
-  corsAllowedOrigins,
   eventIpSalt: required('EVENT_IP_SALT', 'dev-event-salt-change-me'),
   trustProxy: process.env.NODE_ENV === 'production' ? 1 : false,
   appPublicUrl: optional('APP_PUBLIC_URL', clientOrigin),
