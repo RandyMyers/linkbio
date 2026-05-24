@@ -29,7 +29,7 @@ function squadCurrencyForCheckout(currency) {
   return c.toUpperCase();
 }
 
-async function createCardCheckout(user, { planSlug, interval, currency, successUrl, promoCode }) {
+async function createCardCheckout(user, { planSlug, interval, currency, successUrl, promoCode, clientOrigin }) {
   const creds = await getSquadCreds();
   const checkout = await assertPaidPlan(user, { planSlug, interval, currency, promoCode });
   const { plan, billingInterval, priceCurrency, priceAmount, listAmount, creditAmount, chargeType, quote } =
@@ -40,9 +40,10 @@ async function createCardCheckout(user, { planSlug, interval, currency, successU
   const transactionRef = orderId;
   const amountMinor = toMinorUnits(priceAmount, squadCurrency);
 
+  const origin = (clientOrigin || config.clientOrigin).replace(/\/$/, '');
   const callbackUrl =
     successUrl ||
-    `${config.clientOrigin}/checkout?plan=${planSlug}&interval=${billingInterval}&currency=${priceCurrency}&paid=1&provider=squad&orderId=${encodeURIComponent(orderId)}`;
+    `${origin}/checkout?plan=${planSlug}&interval=${billingInterval}&currency=${priceCurrency}&paid=1&provider=squad&orderId=${encodeURIComponent(orderId)}`;
 
   const initiated = await initiateCardPayment(creds.secretKey, {
     email: user.email,

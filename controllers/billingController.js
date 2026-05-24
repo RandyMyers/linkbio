@@ -25,6 +25,7 @@ const {
   confirmCardPayment: confirmStripePayment,
 } = require('../services/stripeBilling');
 const { findGatewayPaymentByOrderId } = require('../services/gatewayPaymentFulfillment');
+const { resolveClientOrigin } = require('../lib/allowedClientOrigins');
 const {
   getSubscriptionState,
   scheduleDowngrade,
@@ -528,6 +529,7 @@ exports.createSquadCheckout = asyncHandler(async (req, res) => {
   const currency = normalizeCurrency(req.body.currency);
   const successUrl = req.body.successUrl;
   const promoCode = String(req.body.promoCode || '').trim();
+  const clientOrigin = resolveClientOrigin(req);
   try {
     const session = await createSquadCheckout(user, {
       planSlug,
@@ -535,6 +537,7 @@ exports.createSquadCheckout = asyncHandler(async (req, res) => {
       currency,
       successUrl,
       promoCode,
+      clientOrigin,
     });
     res.json(session);
   } catch (e) {
@@ -576,6 +579,7 @@ exports.createStripeCheckout = asyncHandler(async (req, res) => {
   const successUrl = req.body.successUrl;
   const cancelUrl = req.body.cancelUrl;
   const promoCode = String(req.body.promoCode || '').trim();
+  const clientOrigin = resolveClientOrigin(req);
   try {
     const session = await createStripeCheckout(user, {
       planSlug,
@@ -584,6 +588,7 @@ exports.createStripeCheckout = asyncHandler(async (req, res) => {
       successUrl,
       cancelUrl,
       promoCode,
+      clientOrigin,
     });
     res.json(session);
   } catch (e) {

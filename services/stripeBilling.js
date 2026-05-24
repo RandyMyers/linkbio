@@ -29,14 +29,15 @@ function stripeCurrencyForCheckout(currency) {
   return c;
 }
 
-function buildStripeReturnUrls({ planSlug, billingInterval, priceCurrency, orderId }) {
-  const base = `${config.clientOrigin}/checkout?plan=${encodeURIComponent(planSlug)}&interval=${encodeURIComponent(billingInterval)}&currency=${encodeURIComponent(priceCurrency)}`;
+function buildStripeReturnUrls({ clientOrigin, planSlug, billingInterval, priceCurrency, orderId }) {
+  const origin = (clientOrigin || config.clientOrigin).replace(/\/$/, '');
+  const base = `${origin}/checkout?plan=${encodeURIComponent(planSlug)}&interval=${encodeURIComponent(billingInterval)}&currency=${encodeURIComponent(priceCurrency)}`;
   const successUrl = `${base}&paid=1&provider=stripe&orderId=${encodeURIComponent(orderId)}&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `${base}&checkout=canceled`;
   return { successUrl, cancelUrl };
 }
 
-async function createCardCheckout(user, { planSlug, interval, currency, successUrl, cancelUrl, promoCode }) {
+async function createCardCheckout(user, { planSlug, interval, currency, successUrl, cancelUrl, promoCode, clientOrigin }) {
   const creds = await getStripeCreds();
   const checkout = await assertPaidPlan(user, { planSlug, interval, currency, promoCode });
   const { plan, billingInterval, priceCurrency, priceAmount, listAmount, creditAmount, chargeType, quote } =
@@ -45,7 +46,13 @@ async function createCardCheckout(user, { planSlug, interval, currency, successU
   const stripeCurrency = stripeCurrencyForCheckout(priceCurrency);
   const orderId = buildOrderId('st', user._id.toString(), planSlug);
   const amountMinor = toMinorUnits(priceAmount, stripeCurrency);
-  const urls = buildStripeReturnUrls({ planSlug, billingInterval, priceCurrency, orderId });
+  const urls = buildStripeReturnUrls({
+    clientOrigin,
+    planSlug,
+    billingInterval,
+    priceCurrency,
+    orderId,
+  });
 
   const session = await createCheckoutSession(creds.secretKey, {
     orderId,

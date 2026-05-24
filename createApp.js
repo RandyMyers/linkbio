@@ -8,6 +8,7 @@ const cookieParser = require('cookie-parser');
 const fileUpload = require('express-fileupload');
 const rateLimit = require('express-rate-limit');
 const config = require('./config');
+const { ALLOWED_CLIENT_ORIGINS } = require('./lib/allowedClientOrigins');
 const requestId = require('./middleware/requestId');
 const { errorHandler } = require('./middleware/errorHandler');
 const healthRoutes = require('./routes/health');
@@ -36,13 +37,6 @@ const ogController = require('./controllers/ogController');
 const robotsController = require('./controllers/robotsController');
 const sitemapController = require('./controllers/sitemapController');
 
-/** Browser origins allowed to call this API (credentials / cookies). */
-const CORS_ALLOWED_ORIGINS = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'https://courageous-cocada-20fd5a.netlify.app',
-];
-
 const corsOptions = {
   origin(origin, callback) {
     if (!origin) {
@@ -50,7 +44,7 @@ const corsOptions = {
       return;
     }
     const normalized = String(origin).replace(/\/$/, '');
-    if (CORS_ALLOWED_ORIGINS.includes(normalized)) {
+    if (ALLOWED_CLIENT_ORIGINS.includes(normalized)) {
       callback(null, normalized);
       return;
     }
