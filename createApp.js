@@ -52,11 +52,13 @@ function createApp() {
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || origin === config.clientOrigin) {
+        // Same-origin / curl / server-to-server — no Origin header
+        if (!origin) {
           callback(null, true);
           return;
         }
-        if (config.nodeEnv !== 'production' && /^http:\/\/localhost:\d+$/.test(origin)) {
+        const normalized = String(origin).replace(/\/$/, '');
+        if (config.corsAllowedOrigins.includes(normalized)) {
           callback(null, true);
           return;
         }
