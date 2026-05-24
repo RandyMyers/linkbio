@@ -1,6 +1,7 @@
 const MarketingCampaign = require('../models/MarketingCampaign');
 const MarketingCampaignReport = require('../models/MarketingCampaignReport');
 const { mailchimpRequest } = require('../lib/mailchimpClient');
+const { getCampaignGeoPerformance } = require('./leadAnalyticsService');
 
 function serializeReport(doc) {
   if (!doc) return null;
@@ -53,6 +54,16 @@ async function fetchAndCacheReport(campaignId, { refresh = false } = {}) {
   const openRate = emailsSent ? Math.round((uniqueOpens / emailsSent) * 1000) / 10 : 0;
   const clickRate = emailsSent ? Math.round((clicks / emailsSent) * 1000) / 10 : 0;
 
+  let geo = { byCountry: {}, byLanguage: {} };
+  try {
+    const geoPerf = await getCampaignGeoPerformance(campaignId);
+    if (geoPerf) {
+      geo = { byCountry: geoPerf.byCountry, byLanguage: geoPerf.byLanguage };
+    }
+  } catch {
+    /* optional enrichment */
+  }
+
   const doc = await MarketingCampaignReport.create({
     campaignId,
     mailchimpCampaignId: campaign.mailchimpCampaignId,
@@ -64,6 +75,8 @@ async function fetchAndCacheReport(campaignId, { refresh = false } = {}) {
     bounces,
     openRate,
     clickRate,
+    performanceByCountry: geo.byCountry,
+    performanceByLanguage: geo.byLanguage,
     raw,
     fetchedAt: new Date(),
   });

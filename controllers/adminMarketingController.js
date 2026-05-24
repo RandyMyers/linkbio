@@ -12,13 +12,16 @@ const {
 } = require('../lib/mailchimpSettings');
 const { ping, getRoot } = require('../lib/mailchimpClient');
 const { LEAD_FIELDS } = require('../lib/leadFieldMapping');
-const { listLeads, getLeadStats, updateLead, serializeLead, createLead, bulkUpdateLeads, exportLeadsCsv } = require('../services/leadService');
+const { listLeads, getLeadStats, getLeadDetail, updateLead, createLead, bulkUpdateLeads, exportLeadsCsv, archiveLead } = require('../services/leadService');
 const {
   parseUploadBuffer,
   previewImport,
   executeImport,
   listMappingTemplates,
   saveMappingTemplate,
+  updateMappingTemplate,
+  deleteMappingTemplate,
+  exportImportErrorsCsv,
 } = require('../services/leadImportService');
 const { parseCsv } = require('../lib/csvParse');
 const { syncLeadToMailchimp } = require('../services/mailchimpMemberSync');
@@ -35,10 +38,18 @@ const {
   scheduleCampaign,
   unscheduleCampaign,
   deleteCampaign,
+  sendCampaignTest,
 } = require('../services/mailchimpCampaignService');
 const { fetchAndCacheReport } = require('../services/mailchimpReportService');
 const { registerListWebhook, webhookUrl } = require('../services/mailchimpWebhookService');
 const { getContactQuota } = require('../services/mailchimpQuotaService');
+const {
+  getConversionsByCountry,
+  getConversionsByLanguage,
+  getFunnel,
+  getCampaignGeoPerformance,
+} = require('../services/leadAnalyticsService');
+const { processMarketingSyncQueue } = require('../jobs/marketingJobs');
 
 exports.getMarketingSettings = asyncHandler(async (req, res) => {
   const doc = await PlatformSettings.findById('global').lean();
@@ -108,12 +119,22 @@ exports.getLeadStats = asyncHandler(async (_req, res) => {
 });
 
 exports.getLead = asyncHandler(async (req, res) => {
-  const lead = await Lead.findById(req.params.id).lean();
+  const detail = await getLeadDetail(req.params.id);
+  if (!detail) {
+    res.status(404).json({ error: 'Lead not found' });
+    return;
+  }
+  res.json(detail);
+});
+
+exports.deleteLead = asyncHandler(async (req, res) => {
+  const lead = await archiveLead(req.params.id);
   if (!lead) {
     res.status(404).json({ error: 'Lead not found' });
     return;
   }
-  res.json({ lead: serializeLead(lead) });
+  await syncLeadToMailchimp(req.params.id);
+  res.json({ lead });
 });
 
 exports.patchLead = asyncHandler(async (req, res) => {
@@ -122,7 +143,11 @@ exports.patchLead = asyncHandler(async (req, res) => {
     res.status(404).json({ error: 'Lead not found' });
     return;
   }
-  res.json({ lead });
+  if (req.body?.syncMailchimp !== false) {
+    await syncLeadToMailchimp(req.params.id);
+  }
+  const refreshed = await getLeadDetail(req.params.id);
+  res.json(refreshed);
 });
 
 exports.syncLead = asyncHandler(async (req, res) => {
@@ -318,6 +343,99 @@ exports.createImportTemplate = asyncHandler(async (req, res) => {
   res.status(201).json({ template });
 });
 
+exports.patchImportTemplate = asyncHandler(async (req, res) => {
+  const template = await updateMappingTemplate(req.params.id, req.body || {});
+  if (!template) {
+    res.status(404).json({ error: 'Template not found' });
+    return;
+  }
+  res.json({ template });
+});
+
+exports.deleteImportTemplate = asyncHandler(async (req, res) => {
+  const ok = await deleteMappingTemplate(req.params.id);
+  if (!ok) {
+    res.status(404).json({ error: 'Template not found' });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+exports.exportImportErrorsCsv = asyncHandler(async (req, res) => {
+  const batch = await LeadImportBatch.findById(req.params.batchId).lean();
+  if (!batch) {
+    res.status(404).json({ error: 'Import batch not found' });
+    return;
+  }
+  const { csv, count } = await exportImportErrorsCsv(req.params.batchId);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="import-${req.params.batchId}-errors.csv"`);
+  res.setHeader('X-Export-Count', String(count));
+  res.send(csv);
+});
+
+exports.getAnalyticsConversionsByCountry = asyncHandler(async (_req, res) => {
+  res.json(await getConversionsByCountry());
+});
+
+exports.getAnalyticsConversionsByLanguage = asyncHandler(async (_req, res) => {
+  res.json(await getConversionsByLanguage());
+});
+
+exports.getAnalyticsFunnel = asyncHandler(async (req, res) => {
+  res.json(await getFunnel({ country: req.query.country, language: req.query.language }));
+});
+
+exports.getCampaignGeoAnalytics = asyncHandler(async (req, res) => {
+  const data = await getCampaignGeoPerformance(req.params.id);
+  if (!data) {
+    res.status(404).json({ error: 'Campaign not found' });
+    return;
+  }
+  res.json(data);
+});
+
+exports.getMarketingHealth = asyncHandler(async (_req, res) => {
+  const doc = await PlatformSettings.findById('global').lean();
+  const mc = doc?.mailchimp || {};
+  let pingOk = null;
+  if (mc.enabled && mc.apiKeyEncrypted) {
+    try {
+      await ping();
+      pingOk = true;
+    } catch (err) {
+      pingOk = false;
+    }
+  }
+  const [syncErrors, unsynced] = await Promise.all([
+    Lead.countDocuments({ mailchimpSyncError: { $exists: true, $nin: [null, ''] } }),
+    Lead.countDocuments({ consentStatus: { $in: ['opted_in', 'pending'] }, mailchimpLastSyncAt: null }),
+  ]);
+  res.json({
+    enabled: !!mc.enabled,
+    lastHealthCheckAt: mc.lastHealthCheckAt ? new Date(mc.lastHealthCheckAt).toISOString() : null,
+    pingOk,
+    syncErrors,
+    unsynced,
+    mergeFieldsProvisioned: !!mc.mergeFieldsProvisioned,
+  });
+});
+
+exports.runSyncQueue = asyncHandler(async (_req, res) => {
+  const result = await processMarketingSyncQueue();
+  res.json(result);
+});
+
+exports.sendCampaignTest = asyncHandler(async (req, res) => {
+  const testEmails = req.body?.testEmails || req.body?.test_emails;
+  const result = await sendCampaignTest(req.params.id, testEmails);
+  if (!result) {
+    res.status(404).json({ error: 'Campaign not found' });
+    return;
+  }
+  res.json(result);
+});
+
 exports.getQuota = asyncHandler(async (_req, res) => {
   const doc = await PlatformSettings.findById('global').lean();
   const mc = doc?.mailchimp || {};
@@ -349,6 +467,12 @@ exports.getWebhookInfo = asyncHandler(async (_req, res) => {
 
 exports.createLead = asyncHandler(async (req, res) => {
   const lead = await createLead(req.body || {});
+  if (req.body?.syncMailchimp !== false) {
+    await syncLeadToMailchimp(lead.id);
+    const refreshed = await getLeadDetail(lead.id);
+    res.status(201).json(refreshed);
+    return;
+  }
   res.status(201).json({ lead });
 });
 

@@ -1,4 +1,5 @@
 const MarketingCampaign = require('../models/MarketingCampaign');
+const Lead = require('../models/Lead');
 const { mailchimpRequest } = require('../lib/mailchimpClient');
 const { getMailchimpSettings } = require('../lib/mailchimpSettings');
 const { estimateRecipients, assertSendAllowed } = require('./mailchimpQuotaService');
@@ -261,7 +262,46 @@ async function sendCampaign(id) {
   campaign.sentAt = new Date();
   campaign.estimatedRecipients = estimate.total;
   await campaign.save();
+
+  await tagCampaignAudience(campaign);
+
   return serializeCampaign(campaign);
+}
+
+async function tagCampaignAudience(campaign) {
+  const filter = { consentStatus: 'opted_in' };
+  if (campaign.targetLanguages?.length) filter.language = { $in: campaign.targetLanguages };
+  if (campaign.targetCountries?.length) filter.country = { $in: campaign.targetCountries };
+  if (campaign.targetConversionStages?.length) {
+    filter.conversionStage = { $in: campaign.targetConversionStages };
+  }
+
+  const tag = `campaign:${campaign._id.toString()}`;
+  await Lead.updateMany(filter, {
+    $set: { lastCampaignId: campaign._id },
+    $addToSet: { tags: tag },
+  });
+}
+
+async function sendCampaignTest(id, testEmails) {
+  const campaign = await MarketingCampaign.findById(id);
+  if (!campaign?.mailchimpCampaignId) return null;
+
+  const emails = (Array.isArray(testEmails) ? testEmails : [testEmails])
+    .map((e) => String(e || '').trim())
+    .filter(Boolean);
+  if (!emails.length) {
+    const err = new Error('At least one test email is required.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  await updateCampaignContent(id);
+  await mailchimpRequest(`/campaigns/${campaign.mailchimpCampaignId}/actions/test`, {
+    method: 'POST',
+    body: { test_emails: emails, send_type: 'html' },
+  });
+  return { ok: true, testEmails: emails };
 }
 
 async function scheduleCampaign(id, scheduleTime) {
@@ -331,5 +371,6 @@ module.exports = {
   scheduleCampaign,
   unscheduleCampaign,
   deleteCampaign,
+  sendCampaignTest,
   buildSegmentOpts,
 };

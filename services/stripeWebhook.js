@@ -103,6 +103,32 @@ async function handleCheckoutSessionCompleted(session, apiKey) {
   });
 }
 
+async function markStripeCheckoutFailed(session, eventType) {
+  const orderId = session.metadata?.orderId || session.client_reference_id || '';
+  if (!orderId) return { ok: true, ignored: true };
+
+  const record = await GatewayPayment.findOne({
+    provider: 'stripe',
+    orderId: String(orderId).trim(),
+  });
+  if (!record) return { ok: true, ignored: true };
+  if (record.paymentStatus === 'successful') {
+    return { ok: true, alreadyFulfilled: true };
+  }
+
+  record.paymentStatus = 'failed';
+  record.meta = {
+    ...record.meta,
+    lastWebhook: {
+      type: eventType,
+      sessionId: session.id || '',
+      paymentStatus: session.payment_status || '',
+    },
+  };
+  await record.save();
+  return { ok: true, status: 'failed', orderId: record.orderId };
+}
+
 async function handleStripeWebhook(rawBody, headers) {
   const signature = headers['stripe-signature'] || headers['Stripe-Signature'] || '';
   if (!signature) {
@@ -113,11 +139,24 @@ async function handleStripeWebhook(rawBody, headers) {
 
   const { event, apiKey } = await constructStripeEvent(rawBody, signature);
 
-  if (event.type === 'checkout.session.completed') {
-    return handleCheckoutSessionCompleted(event.data.object, apiKey);
+  switch (event.type) {
+    case 'checkout.session.completed':
+      return handleCheckoutSessionCompleted(event.data.object, apiKey);
+    case 'checkout.session.expired':
+    case 'checkout.session.async_payment_failed':
+      return markStripeCheckoutFailed(event.data.object, event.type);
+    case 'payment_intent.payment_failed': {
+      const pi = event.data.object;
+      const orderId = pi.metadata?.orderId || '';
+      if (!orderId) return { ok: true, ignored: true, type: event.type };
+      return markStripeCheckoutFailed(
+        { metadata: { orderId }, id: pi.id, payment_status: 'unpaid' },
+        event.type,
+      );
+    }
+    default:
+      return { ok: true, ignored: true, type: event.type };
   }
-
-  return { ok: true, ignored: true, type: event.type };
 }
 
-module.exports = { handleStripeWebhook };
+module.exports = { handleStripeWebhook, markStripeCheckoutFailed };

@@ -33,6 +33,7 @@ const leadSchema = new mongoose.Schema(
     mailchimpStatus: { type: String, default: '' },
     mailchimpLastSyncAt: { type: Date, default: null },
     mailchimpSyncError: { type: String, default: null },
+    lastCampaignId: { type: mongoose.Schema.Types.ObjectId, ref: 'MarketingCampaign', default: null },
   },
   { timestamps: true },
 );

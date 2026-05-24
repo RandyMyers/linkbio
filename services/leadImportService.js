@@ -301,6 +301,39 @@ async function saveMappingTemplate({ name, columnMapping, defaultTags, defaultCo
   return { id: doc._id.toString(), name: doc.name };
 }
 
+async function updateMappingTemplate(id, patch) {
+  const doc = await LeadImportMappingTemplate.findById(id);
+  if (!doc) return null;
+  if (patch.name !== undefined) doc.name = String(patch.name).trim().slice(0, 120);
+  if (patch.columnMapping !== undefined) doc.columnMapping = patch.columnMapping;
+  if (patch.defaultTags !== undefined) doc.defaultTags = patch.defaultTags || [];
+  if (patch.defaultConsentStatus !== undefined) doc.defaultConsentStatus = patch.defaultConsentStatus;
+  await doc.save();
+  return {
+    id: doc._id.toString(),
+    name: doc.name,
+    columnMapping: doc.columnMapping,
+    defaultTags: doc.defaultTags || [],
+    defaultConsentStatus: doc.defaultConsentStatus,
+  };
+}
+
+async function deleteMappingTemplate(id) {
+  const result = await LeadImportMappingTemplate.deleteOne({ _id: id });
+  return result.deletedCount > 0;
+}
+
+async function exportImportErrorsCsv(batchId) {
+  const rows = await LeadImportRow.find({ batchId, outcome: 'error' }).sort({ rowNumber: 1 }).lean();
+  const esc = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+  const header = 'row_number,error_message,raw_row';
+  const lines = rows.map((r) => {
+    const raw = esc(typeof r.raw === 'object' ? JSON.stringify(r.raw) : r.raw);
+    return [r.rowNumber, esc(r.errorMessage || ''), raw].join(',');
+  });
+  return { csv: [header, ...lines].join('\n'), count: rows.length };
+}
+
 function readCsvFile(path) {
   const buffer = fs.readFileSync(path);
   return parseUploadBuffer(buffer);
@@ -313,6 +346,9 @@ module.exports = {
   createBatchFromUpload,
   listMappingTemplates,
   saveMappingTemplate,
+  updateMappingTemplate,
+  deleteMappingTemplate,
+  exportImportErrorsCsv,
   readCsvFile,
   applyMapping,
   rowToObject,

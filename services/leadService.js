@@ -30,6 +30,7 @@ function serializeLead(doc) {
     mailchimpStatus: d.mailchimpStatus || '',
     mailchimpLastSyncAt: d.mailchimpLastSyncAt ? new Date(d.mailchimpLastSyncAt).toISOString() : null,
     mailchimpSyncError: d.mailchimpSyncError || null,
+    lastCampaignId: d.lastCampaignId ? d.lastCampaignId.toString() : null,
     createdAt: d.createdAt ? new Date(d.createdAt).toISOString() : null,
     updatedAt: d.updatedAt ? new Date(d.updatedAt).toISOString() : null,
   };
@@ -63,6 +64,35 @@ async function listLeads({ page = 1, limit = 50, country, language, consentStatu
     Lead.countDocuments(filter),
   ]);
   return { leads: rows.map(serializeLead), total, page: Math.max(1, Number(page) || 1), limit: cap };
+}
+
+async function getLeadDetail(id) {
+  const lead = await Lead.findById(id).lean();
+  if (!lead) return null;
+  const events = await LeadConversionEvent.find({ leadId: lead._id })
+    .sort({ createdAt: -1 })
+    .limit(50)
+    .lean();
+  return {
+    lead: serializeLead(lead),
+    conversionTimeline: events.map((e) => ({
+      id: e._id.toString(),
+      fromStage: e.fromStage || '',
+      toStage: e.toStage,
+      source: e.source,
+      at: e.createdAt ? new Date(e.createdAt).toISOString() : null,
+    })),
+  };
+}
+
+async function archiveLead(id) {
+  const lead = await Lead.findById(id);
+  if (!lead) return null;
+  lead.consentStatus = 'opted_out';
+  lead.optedOutAt = new Date();
+  lead.tags = [...new Set([...(lead.tags || []), 'archived'])];
+  await lead.save();
+  return serializeLead(lead);
 }
 
 async function getLeadStats() {
@@ -216,11 +246,13 @@ async function exportLeadsCsv({ country, language, consentStatus, conversionStag
 module.exports = {
   serializeLead,
   listLeads,
+  getLeadDetail,
   getLeadStats,
   updateLead,
   createLead,
   bulkUpdateLeads,
   exportLeadsCsv,
+  archiveLead,
   buildLeadFilter,
   recordConversionEvent,
 };

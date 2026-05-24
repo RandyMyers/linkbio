@@ -91,7 +91,16 @@ router.get('/admin/marketing/leads/stats', adminMarketingController.getLeadStats
 router.get('/admin/marketing/leads', adminMarketingController.listLeads);
 router.get('/admin/marketing/leads/:id', adminMarketingController.getLead);
 router.patch('/admin/marketing/leads/:id', adminMarketingController.patchLead);
+router.delete('/admin/marketing/leads/:id', adminMarketingController.deleteLead);
 router.post('/admin/marketing/leads/:id/sync', adminMarketingController.syncLead);
+
+router.get('/admin/marketing/analytics/conversions-by-country', adminMarketingController.getAnalyticsConversionsByCountry);
+router.get('/admin/marketing/analytics/conversions-by-language', adminMarketingController.getAnalyticsConversionsByLanguage);
+router.get('/admin/marketing/analytics/funnel', adminMarketingController.getAnalyticsFunnel);
+router.get('/admin/marketing/analytics/campaigns/:id/geo', adminMarketingController.getCampaignGeoAnalytics);
+
+router.get('/admin/marketing/health', adminMarketingController.getMarketingHealth);
+router.post('/admin/marketing/sync-queue/run', adminMarketingController.runSyncQueue);
 
 router.get('/admin/marketing/campaigns', adminMarketingController.listCampaigns);
 router.post('/admin/marketing/campaigns', adminMarketingController.createCampaign);
@@ -99,6 +108,7 @@ router.get('/admin/marketing/campaigns/:id', adminMarketingController.getCampaig
 router.patch('/admin/marketing/campaigns/:id', adminMarketingController.patchCampaign);
 router.delete('/admin/marketing/campaigns/:id', adminMarketingController.deleteCampaign);
 router.post('/admin/marketing/campaigns/:id/preview-recipients', adminMarketingController.previewCampaignRecipients);
+router.post('/admin/marketing/campaigns/:id/test', adminMarketingController.sendCampaignTest);
 router.get('/admin/marketing/campaigns/:id/checklist', adminMarketingController.getCampaignChecklist);
 router.post('/admin/marketing/campaigns/:id/send', adminMarketingController.sendCampaign);
 router.post('/admin/marketing/campaigns/:id/schedule', adminMarketingController.scheduleCampaign);
@@ -108,10 +118,13 @@ router.get('/admin/marketing/campaigns/:id/report', adminMarketingController.get
 router.post('/admin/marketing/imports/upload', adminMarketingController.uploadImport);
 router.post('/admin/marketing/imports/:batchId/preview', adminMarketingController.previewImport);
 router.post('/admin/marketing/imports/:batchId/execute', adminMarketingController.executeImport);
+router.get('/admin/marketing/imports/:batchId/errors.csv', adminMarketingController.exportImportErrorsCsv);
 router.get('/admin/marketing/imports', adminMarketingController.listImports);
 router.get('/admin/marketing/imports/:batchId', adminMarketingController.getImport);
 
 router.get('/admin/marketing/import-templates', adminMarketingController.listImportTemplates);
 router.post('/admin/marketing/import-templates', adminMarketingController.createImportTemplate);
+router.patch('/admin/marketing/import-templates/:id', adminMarketingController.patchImportTemplate);
+router.delete('/admin/marketing/import-templates/:id', adminMarketingController.deleteImportTemplate);
 
 module.exports = router;
