@@ -30,6 +30,7 @@ const userSchema = new mongoose.Schema(
       ref: 'BioProfile',
       default: null,
     },
+    onboardingCompleted: { type: Boolean, default: false },
     notificationPrefs: {
       weeklyAnalytics: { type: Boolean, default: true },
       newSubscribers: { type: Boolean, default: true },
