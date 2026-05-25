@@ -52,6 +52,9 @@ exports.publicSubscribe = asyncHandler(async (req, res) => {
     subscriberId: row._id.toString(),
   });
 
+  const { syncLeadFromNewsletterSubscriber } = require('../services/marketingLeadSync');
+  syncLeadFromNewsletterSubscriber({ email, name, username }).catch(() => {});
+
   res.status(201).json({ ok: true });
 });
 

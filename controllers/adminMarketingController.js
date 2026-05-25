@@ -5,6 +5,7 @@ const PlatformSettings = require('../models/PlatformSettings');
 const Lead = require('../models/Lead');
 const LeadImportBatch = require('../models/LeadImportBatch');
 const LeadImportRow = require('../models/LeadImportRow');
+const LeadImportMappingTemplate = require('../models/LeadImportMappingTemplate');
 const { asyncHandler } = require('../middleware/errorHandler');
 const {
   serializeMailchimpSettings,
@@ -12,7 +13,17 @@ const {
 } = require('../lib/mailchimpSettings');
 const { ping, getRoot } = require('../lib/mailchimpClient');
 const { LEAD_FIELDS } = require('../lib/leadFieldMapping');
-const { listLeads, getLeadStats, getLeadDetail, updateLead, createLead, bulkUpdateLeads, exportLeadsCsv, archiveLead } = require('../services/leadService');
+const {
+  listLeads,
+  getLeadStats,
+  getLeadDetail,
+  updateLead,
+  createLead,
+  bulkUpdateLeads,
+  exportLeadsCsv,
+  archiveLead,
+  deleteLeadPermanent,
+} = require('../services/leadService');
 const {
   parseUploadBuffer,
   previewImport,
@@ -39,10 +50,32 @@ const {
   unscheduleCampaign,
   deleteCampaign,
   sendCampaignTest,
+  replicateCampaign,
+  cancelCampaignSend,
 } = require('../services/mailchimpCampaignService');
-const { fetchAndCacheReport } = require('../services/mailchimpReportService');
+const {
+  fetchAndCacheReport,
+  getReportOpenDetails,
+  getCampaignPerformanceSummary,
+} = require('../services/mailchimpReportService');
+const { createSegmentFromLeadFilters } = require('../services/mailchimpSegmentService');
+const { searchMembers } = require('../services/mailchimpSearchService');
+const { scheduleImport } = require('../services/scheduledImportService');
 const { registerListWebhook, webhookUrl } = require('../services/mailchimpWebhookService');
-const { getContactQuota } = require('../services/mailchimpQuotaService');
+const { getContactQuota, listMailchimpAudiences } = require('../services/mailchimpQuotaService');
+const {
+  getAudienceDetail,
+  listAudienceMembers,
+  getAudienceActivity,
+  listAudienceSegments,
+  listAudienceTags,
+} = require('../services/mailchimpAudiencesService');
+const { listTemplates, getTemplate, createTemplate } = require('../services/mailchimpTemplatesService');
+const {
+  listCampaignGroups,
+  getCampaignGroup,
+  createCampaignGroupId,
+} = require('../services/campaignGroupService');
 const {
   getConversionsByCountry,
   getConversionsByLanguage,
@@ -74,6 +107,11 @@ exports.patchMarketingSettings = asyncHandler(async (req, res) => {
   }
   if (body.supportedLanguages !== undefined && Array.isArray(body.supportedLanguages)) {
     updates.supportedLanguages = body.supportedLanguages.map((s) => String(s).trim().toLowerCase()).filter(Boolean);
+  }
+  if (body.autoSyncSignups !== undefined) updates.autoSyncSignups = !!body.autoSyncSignups;
+  if (body.autoSyncSubscribers !== undefined) updates.autoSyncSubscribers = !!body.autoSyncSubscribers;
+  if (body.autoSyncPaidSubscribers !== undefined) {
+    updates.autoSyncPaidSubscribers = !!body.autoSyncPaidSubscribers;
   }
 
   const apiKeyPlain = body.apiKey !== undefined ? body.apiKey : undefined;
@@ -108,6 +146,8 @@ exports.listLeads = asyncHandler(async (req, res) => {
     language: req.query.language,
     consentStatus: req.query.consentStatus,
     conversionStage: req.query.conversionStage,
+    importBatchId: req.query.importBatchId,
+    tag: req.query.tag,
     q: req.query.q,
   });
   res.json(data);
@@ -137,6 +177,19 @@ exports.deleteLead = asyncHandler(async (req, res) => {
   res.json({ lead });
 });
 
+exports.deleteLeadPermanent = asyncHandler(async (req, res) => {
+  if (!req.body?.confirm) {
+    res.status(400).json({ error: 'confirm: true required for permanent erasure' });
+    return;
+  }
+  const lead = await deleteLeadPermanent(req.params.id);
+  if (!lead) {
+    res.status(404).json({ error: 'Lead not found' });
+    return;
+  }
+  res.json({ lead, ok: true });
+});
+
 exports.patchLead = asyncHandler(async (req, res) => {
   const lead = await updateLead(req.params.id, req.body || {});
   if (!lead) {
@@ -164,12 +217,14 @@ exports.uploadImport = asyncHandler(async (req, res) => {
   const buffer = file.data || fs.readFileSync(file.tempFilePath);
   const parsed = parseUploadBuffer(buffer);
   const name = String(req.body?.name || file.name || 'CSV import').trim().slice(0, 120);
+  const defaultTpl = await LeadImportMappingTemplate.findOne({ isDefault: true }).lean();
+  const columnMapping = defaultTpl?.columnMapping || parsed.suggestedMapping;
 
   const batch = await LeadImportBatch.create({
     name,
     filename: file.name || 'import.csv',
     status: 'mapping',
-    columnMapping: parsed.suggestedMapping,
+    columnMapping,
     duplicatePolicy: req.body?.duplicatePolicy || 'update',
     defaultConsentStatus: req.body?.defaultConsentStatus || 'opted_in',
     createdBy: req.userId || null,
@@ -190,7 +245,8 @@ exports.uploadImport = asyncHandler(async (req, res) => {
     headers: parsed.headers,
     totalRows: parsed.totalRows,
     previewRows: parsed.previewRows,
-    suggestedMapping: parsed.suggestedMapping,
+    suggestedMapping: columnMapping,
+    appliedDefaultTemplate: defaultTpl ? { id: defaultTpl._id.toString(), name: defaultTpl.name } : null,
   });
 });
 
@@ -275,6 +331,7 @@ exports.executeImport = asyncHandler(async (req, res) => {
       defaultTags: batch.defaultTags,
       defaultConsentStatus: batch.defaultConsentStatus,
       userId: req.userId,
+      isDefault: !!req.body.setAsDefaultTemplate,
     });
   }
 
@@ -328,7 +385,7 @@ exports.listImportTemplates = asyncHandler(async (_req, res) => {
 });
 
 exports.createImportTemplate = asyncHandler(async (req, res) => {
-  const { name, columnMapping, defaultTags, defaultConsentStatus } = req.body || {};
+  const { name, columnMapping, defaultTags, defaultConsentStatus, isDefault } = req.body || {};
   if (!name || !columnMapping) {
     res.status(400).json({ error: 'name and columnMapping required' });
     return;
@@ -339,8 +396,19 @@ exports.createImportTemplate = asyncHandler(async (req, res) => {
     defaultTags,
     defaultConsentStatus,
     userId: req.userId,
+    isDefault,
   });
   res.status(201).json({ template });
+});
+
+exports.scheduleImport = asyncHandler(async (req, res) => {
+  const scheduledAt = req.body?.scheduledAt;
+  if (!scheduledAt) {
+    res.status(400).json({ error: 'scheduledAt required (ISO8601)' });
+    return;
+  }
+  const result = await scheduleImport(req.params.batchId, scheduledAt);
+  res.json(result);
 });
 
 exports.patchImportTemplate = asyncHandler(async (req, res) => {
@@ -447,6 +515,96 @@ exports.getQuota = asyncHandler(async (_req, res) => {
     headroom: limit > 0 ? Math.max(0, limit - used) : null,
     pct: limit > 0 ? Math.round((used / limit) * 1000) / 10 : null,
   });
+});
+
+exports.listAudiences = asyncHandler(async (_req, res) => {
+  const data = await listMailchimpAudiences();
+  res.json(data);
+});
+
+exports.getAudience = asyncHandler(async (req, res) => {
+  const audience = await getAudienceDetail(req.params.listId);
+  res.json({ audience });
+});
+
+exports.listAudienceMembers = asyncHandler(async (req, res) => {
+  const data = await listAudienceMembers(req.params.listId, {
+    status: req.query.status,
+    count: req.query.count,
+    offset: req.query.offset,
+  });
+  res.json(data);
+});
+
+exports.getAudienceActivity = asyncHandler(async (req, res) => {
+  const data = await getAudienceActivity(req.params.listId);
+  res.json(data);
+});
+
+exports.listAudienceSegments = asyncHandler(async (req, res) => {
+  const data = await listAudienceSegments(req.params.listId);
+  res.json(data);
+});
+
+exports.listAudienceTags = asyncHandler(async (req, res) => {
+  const data = await listAudienceTags(req.params.listId);
+  res.json(data);
+});
+
+exports.createAudienceSegment = asyncHandler(async (req, res) => {
+  const data = await createSegmentFromLeadFilters({
+    name: req.body?.name,
+    filter: req.body?.filter || {},
+    listId: req.params.listId,
+  });
+  res.status(201).json(data);
+});
+
+exports.searchMailchimpMembers = asyncHandler(async (req, res) => {
+  const data = await searchMembers(req.query.q, { count: req.query.count });
+  res.json(data);
+});
+
+exports.getCampaignPerformance = asyncHandler(async (_req, res) => {
+  res.json(await getCampaignPerformanceSummary({ limit: 10 }));
+});
+
+exports.listMailchimpTemplates = asyncHandler(async (req, res) => {
+  const data = await listTemplates({ count: req.query.count, type: req.query.type });
+  res.json(data);
+});
+
+exports.getMailchimpTemplate = asyncHandler(async (req, res) => {
+  const template = await getTemplate(req.params.templateId);
+  res.json({ template });
+});
+
+exports.createMailchimpTemplate = asyncHandler(async (req, res) => {
+  const template = await createTemplate(req.body || {});
+  res.status(201).json({ template });
+});
+
+exports.listCampaignGroups = asyncHandler(async (_req, res) => {
+  const data = await listCampaignGroups();
+  res.json(data);
+});
+
+exports.getCampaignGroup = asyncHandler(async (req, res) => {
+  const group = await getCampaignGroup(req.params.groupId);
+  if (!group) {
+    res.status(404).json({ error: 'Campaign group not found' });
+    return;
+  }
+  res.json({ group });
+});
+
+exports.createCampaignGroup = asyncHandler(async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  if (!name) {
+    res.status(400).json({ error: 'Group name required' });
+    return;
+  }
+  res.status(201).json({ id: createCampaignGroupId(name), name });
 });
 
 exports.provisionMergeFields = asyncHandler(async (_req, res) => {
@@ -607,4 +765,48 @@ exports.getCampaignReport = asyncHandler(async (req, res) => {
     return;
   }
   res.json({ report });
+});
+
+exports.getCampaignReportOpens = asyncHandler(async (req, res) => {
+  const data = await getReportOpenDetails(req.params.id);
+  if (!data) {
+    res.status(404).json({ error: 'Report not available' });
+    return;
+  }
+  res.json(data);
+});
+
+exports.putCampaignContent = asyncHandler(async (req, res) => {
+  const campaign = await updateCampaign(req.params.id, {
+    htmlContent: req.body?.htmlContent,
+    plainText: req.body?.plainText,
+  });
+  if (!campaign) {
+    res.status(404).json({ error: 'Campaign not found' });
+    return;
+  }
+  const updated = await updateCampaignContent(req.params.id);
+  res.json({ campaign: updated });
+});
+
+exports.replicateCampaign = asyncHandler(async (req, res) => {
+  const campaign = await replicateCampaign(req.params.id);
+  if (!campaign) {
+    res.status(404).json({ error: 'Campaign not found' });
+    return;
+  }
+  res.status(201).json({ campaign });
+});
+
+exports.cancelCampaignSend = asyncHandler(async (req, res) => {
+  try {
+    const campaign = await cancelCampaignSend(req.params.id);
+    if (!campaign) {
+      res.status(404).json({ error: 'Campaign not found' });
+      return;
+    }
+    res.json({ campaign });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
 });

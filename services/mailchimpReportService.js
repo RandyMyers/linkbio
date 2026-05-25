@@ -89,4 +89,61 @@ async function fetchAndCacheReport(campaignId, { refresh = false } = {}) {
   return serializeReport(doc);
 }
 
-module.exports = { serializeReport, fetchAndCacheReport };
+async function getReportOpenDetails(campaignId) {
+  const campaign = await MarketingCampaign.findById(campaignId).lean();
+  if (!campaign?.mailchimpCampaignId) return null;
+  try {
+    const data = await mailchimpRequest(`/reports/${campaign.mailchimpCampaignId}/open-details`);
+    const opens = (data.members || []).map((m) => ({
+      email: m.email_address,
+      opens: m.opens_count ?? 1,
+      openTime: m.open_timestamp || m.last_open || null,
+    }));
+    return { opens, total: data.total_items ?? opens.length };
+  } catch (err) {
+    if (err.statusCode === 404) return { opens: [], total: 0 };
+    throw err;
+  }
+}
+
+async function getCampaignPerformanceSummary({ limit = 10 } = {}) {
+  const campaigns = await MarketingCampaign.find({ status: { $in: ['sent', 'sending'] } })
+    .sort({ sentAt: -1 })
+    .limit(Math.min(20, Number(limit) || 10))
+    .lean();
+  const reports = await MarketingCampaignReport.find({
+    campaignId: { $in: campaigns.map((c) => c._id) },
+  })
+    .sort({ fetchedAt: -1 })
+    .lean();
+
+  const byCampaign = new Map();
+  for (const r of reports) {
+    const cid = r.campaignId?.toString();
+    if (!cid || byCampaign.has(cid)) continue;
+    byCampaign.set(cid, r);
+  }
+
+  return {
+    campaigns: campaigns.map((c) => {
+      const r = byCampaign.get(c._id.toString());
+      return {
+        id: c._id.toString(),
+        title: c.title,
+        status: c.status,
+        sentAt: c.sentAt ? new Date(c.sentAt).toISOString() : null,
+        emailsSent: r?.emailsSent ?? c.estimatedRecipients ?? 0,
+        openRate: r?.openRate ?? 0,
+        clickRate: r?.clickRate ?? 0,
+        unsubscribes: r?.unsubscribes ?? 0,
+      };
+    }),
+  };
+}
+
+module.exports = {
+  serializeReport,
+  fetchAndCacheReport,
+  getReportOpenDetails,
+  getCampaignPerformanceSummary,
+};

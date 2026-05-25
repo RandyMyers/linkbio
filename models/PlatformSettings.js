@@ -46,6 +46,17 @@ const platformSettingsSchema = new mongoose.Schema(
         default: () => ['en', 'fr', 'es', 'de', 'pt'],
       },
       lastHealthCheckAt: { type: Date, default: null },
+      /** Create/update Lead when a creator signs up */
+      autoSyncSignups: { type: Boolean, default: false },
+      /** Create/update Lead when someone subscribes via newsletter block */
+      autoSyncSubscribers: { type: Boolean, default: false },
+      /** Mark lead paid when creator subscribes to a paid LinkBio plan */
+      autoSyncPaidSubscribers: { type: Boolean, default: false },
+      cachedListStats: {
+        memberCount: { type: Number, default: 0 },
+        totalContacts: { type: Number, default: 0 },
+        fetchedAt: { type: Date, default: null },
+      },
     },
     updatedBy: { type: String, default: '', trim: true },
   },

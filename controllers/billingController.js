@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Plan = require('../models/Plan');
 const PaymentRequest = require('../models/PaymentRequest');
 const CryptoPayment = require('../models/CryptoPayment');
+const GatewayPayment = require('../models/GatewayPayment');
 const { entitlementLimits } = require('../lib/entitlements');
 const { VALID_BILLING_INTERVALS, normalizeInterval, normalizeAllowedBillingIntervals } = require('../lib/billingIntervals');
 const { VALID_CURRENCIES, normalizeCurrency } = require('../lib/currencies');
@@ -96,6 +97,12 @@ exports.getBilling = asyncHandler(async (req, res) => {
     .limit(5)
     .lean();
 
+  const recentGateway = await GatewayPayment.find({ userId: user._id, type: 'subscription' })
+    .sort({ createdAt: -1 })
+    .limit(5)
+    .lean();
+
+  const subscriptionState = getSubscriptionState(user);
   const platform = await PlatformSettings.findById('global').lean();
   const paymentConfig = await buildCreatorBillingPaymentConfig();
   const cryptoConfigured = await isNowPaymentsConfigured();
@@ -116,6 +123,9 @@ exports.getBilling = asyncHandler(async (req, res) => {
     scheduledChangeAt: user.scheduledChangeAt
       ? new Date(user.scheduledChangeAt).toISOString()
       : null,
+    isActive: subscriptionState.isActive,
+    isLapsed: subscriptionState.isLapsed,
+    daysRemaining: subscriptionState.daysRemaining,
     billingEnabled: platform?.billingEnabled !== false,
     nowpaymentsConfigured: cryptoConfigured,
     flutterwaveConfigured: paymentConfig.flutterwaveConfigured,
@@ -151,6 +161,16 @@ exports.getBilling = asyncHandler(async (req, res) => {
       paymentStatus: c.paymentStatus,
       invoiceUrl: c.invoiceUrl,
       createdAt: c.createdAt ? new Date(c.createdAt).toISOString() : null,
+    })),
+    recentGatewayPayments: recentGateway.map((g) => ({
+      orderId: g.orderId,
+      provider: g.provider,
+      planSlug: g.planSlug,
+      billingInterval: normalizeInterval(g.billingInterval),
+      paymentStatus: g.paymentStatus,
+      priceAmount: g.priceAmount,
+      priceCurrency: g.priceCurrency,
+      createdAt: g.createdAt ? new Date(g.createdAt).toISOString() : null,
     })),
   });
 });
@@ -335,7 +355,23 @@ exports.scheduleSubscriptionDowngrade = asyncHandler(async (req, res) => {
 
 exports.getSubscriptionHistory = asyncHandler(async (req, res) => {
   const limit = Number(req.query.limit) || 50;
-  const data = await subscriptionHistoryForUser(req.userId, { limit });
+  const rawFilter = String(req.query.filter || 'all').toLowerCase();
+  const filter = ['subscriptions', 'payments', 'all'].includes(rawFilter) ? rawFilter : 'all';
+  const data = await subscriptionHistoryForUser(req.userId, { limit, filter });
+  res.json(data);
+});
+
+exports.getSubscriptionEvents = asyncHandler(async (req, res) => {
+  const { subscriptionEventsForUser } = require('../services/subscriptionHistory');
+  const limit = Number(req.query.limit) || 50;
+  const data = await subscriptionEventsForUser(req.userId, { limit });
+  res.json(data);
+});
+
+exports.getPaymentHistory = asyncHandler(async (req, res) => {
+  const { paymentHistoryForUser } = require('../services/subscriptionHistory');
+  const limit = Number(req.query.limit) || 50;
+  const data = await paymentHistoryForUser(req.userId, { limit });
   res.json(data);
 });
 

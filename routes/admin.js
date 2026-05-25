@@ -12,6 +12,7 @@ const adminSubscriptionsController = require('../controllers/adminSubscriptionsC
 const adminPromoCodesController = require('../controllers/adminPromoCodesController');
 const adminMarketingController = require('../controllers/adminMarketingController');
 const adminCryptoPaymentsController = require('../controllers/adminCryptoPaymentsController');
+const adminGatewayPaymentsController = require('../controllers/adminGatewayPaymentsController');
 const { requireAuth } = require('../middleware/requireAuth');
 const { requireAdmin } = require('../middleware/requireAdmin');
 
@@ -40,6 +41,12 @@ router.get('/admin/crypto-payments/:orderId', adminCryptoPaymentsController.getC
 router.post(
   '/admin/crypto-payments/:orderId/reconcile',
   adminCryptoPaymentsController.reconcileCryptoPayment,
+);
+
+router.get('/admin/gateway-payments', adminGatewayPaymentsController.listGatewayPayments);
+router.post(
+  '/admin/gateway-payments/:orderId/reconcile',
+  adminGatewayPaymentsController.reconcileGatewayPayment,
 );
 
 router.get('/admin/users', adminUsersController.listUsers);
@@ -83,6 +90,24 @@ router.post('/admin/marketing/settings/register-webhook', adminMarketingControll
 router.get('/admin/marketing/settings/webhook-info', adminMarketingController.getWebhookInfo);
 router.get('/admin/marketing/lead-fields', adminMarketingController.getLeadFieldDefinitions);
 router.get('/admin/marketing/quota', adminMarketingController.getQuota);
+router.get('/admin/marketing/audiences', adminMarketingController.listAudiences);
+router.get('/admin/marketing/audiences/:listId/members', adminMarketingController.listAudienceMembers);
+router.get('/admin/marketing/audiences/:listId/activity', adminMarketingController.getAudienceActivity);
+router.get('/admin/marketing/audiences/:listId/segments', adminMarketingController.listAudienceSegments);
+router.get('/admin/marketing/audiences/:listId/tags', adminMarketingController.listAudienceTags);
+router.post('/admin/marketing/audiences/:listId/segments', adminMarketingController.createAudienceSegment);
+router.get('/admin/marketing/audiences/:listId', adminMarketingController.getAudience);
+
+router.get('/admin/marketing/search', adminMarketingController.searchMailchimpMembers);
+router.get('/admin/marketing/analytics/campaign-performance', adminMarketingController.getCampaignPerformance);
+
+router.get('/admin/marketing/templates', adminMarketingController.listMailchimpTemplates);
+router.post('/admin/marketing/templates', adminMarketingController.createMailchimpTemplate);
+router.get('/admin/marketing/templates/:templateId', adminMarketingController.getMailchimpTemplate);
+
+router.get('/admin/marketing/campaign-groups', adminMarketingController.listCampaignGroups);
+router.post('/admin/marketing/campaign-groups', adminMarketingController.createCampaignGroup);
+router.get('/admin/marketing/campaign-groups/:groupId', adminMarketingController.getCampaignGroup);
 
 router.get('/admin/marketing/leads/export.csv', adminMarketingController.exportLeadsCsv);
 router.post('/admin/marketing/leads/bulk-update', adminMarketingController.bulkUpdateLeads);
@@ -92,6 +117,7 @@ router.get('/admin/marketing/leads', adminMarketingController.listLeads);
 router.get('/admin/marketing/leads/:id', adminMarketingController.getLead);
 router.patch('/admin/marketing/leads/:id', adminMarketingController.patchLead);
 router.delete('/admin/marketing/leads/:id', adminMarketingController.deleteLead);
+router.post('/admin/marketing/leads/:id/delete-permanent', adminMarketingController.deleteLeadPermanent);
 router.post('/admin/marketing/leads/:id/sync', adminMarketingController.syncLead);
 
 router.get('/admin/marketing/analytics/conversions-by-country', adminMarketingController.getAnalyticsConversionsByCountry);
@@ -113,10 +139,15 @@ router.get('/admin/marketing/campaigns/:id/checklist', adminMarketingController.
 router.post('/admin/marketing/campaigns/:id/send', adminMarketingController.sendCampaign);
 router.post('/admin/marketing/campaigns/:id/schedule', adminMarketingController.scheduleCampaign);
 router.post('/admin/marketing/campaigns/:id/unschedule', adminMarketingController.unscheduleCampaign);
+router.get('/admin/marketing/campaigns/:id/report/opens', adminMarketingController.getCampaignReportOpens);
 router.get('/admin/marketing/campaigns/:id/report', adminMarketingController.getCampaignReport);
+router.put('/admin/marketing/campaigns/:id/content', adminMarketingController.putCampaignContent);
+router.post('/admin/marketing/campaigns/:id/replicate', adminMarketingController.replicateCampaign);
+router.post('/admin/marketing/campaigns/:id/cancel-send', adminMarketingController.cancelCampaignSend);
 
 router.post('/admin/marketing/imports/upload', adminMarketingController.uploadImport);
 router.post('/admin/marketing/imports/:batchId/preview', adminMarketingController.previewImport);
+router.post('/admin/marketing/imports/:batchId/schedule', adminMarketingController.scheduleImport);
 router.post('/admin/marketing/imports/:batchId/execute', adminMarketingController.executeImport);
 router.get('/admin/marketing/imports/:batchId/errors.csv', adminMarketingController.exportImportErrorsCsv);
 router.get('/admin/marketing/imports', adminMarketingController.listImports);

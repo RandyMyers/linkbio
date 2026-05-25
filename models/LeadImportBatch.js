@@ -7,9 +7,10 @@ const leadImportBatchSchema = new mongoose.Schema(
     tempFilePath: { type: String, default: '', trim: true },
     status: {
       type: String,
-      enum: ['uploaded', 'mapping', 'previewing', 'processing', 'done', 'failed'],
+      enum: ['uploaded', 'mapping', 'previewing', 'scheduled', 'processing', 'done', 'failed'],
       default: 'uploaded',
     },
+    scheduledAt: { type: Date, default: null, index: true },
     columnMapping: { type: mongoose.Schema.Types.Mixed, default: {} },
     mappingTemplateId: { type: mongoose.Schema.Types.ObjectId, ref: 'LeadImportMappingTemplate', default: null },
     duplicatePolicy: {

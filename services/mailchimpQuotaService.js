@@ -94,10 +94,44 @@ async function fetchListStats() {
   }
 }
 
+/** GET /lists — Mailchimp Marketing API audiences */
+async function listMailchimpAudiences() {
+  const data = await mailchimpRequest('/lists?count=50&include_total_contacts=true');
+  const lists = (data.lists || []).map((list) => ({
+    id: list.id,
+    name: list.name,
+    memberCount: list.stats?.member_count ?? 0,
+    totalContacts: list.stats?.total_contacts ?? 0,
+    unsubscribeCount: list.stats?.unsubscribe_count ?? 0,
+    cleanedCount: list.stats?.cleaned_count ?? 0,
+  }));
+  return { lists };
+}
+
+async function refreshAccountStatsCache() {
+  const stats = await fetchListStats();
+  if (!stats) return { skipped: true };
+  await PlatformSettings.updateOne(
+    { _id: 'global' },
+    {
+      $set: {
+        'mailchimp.cachedListStats': {
+          memberCount: stats.memberCount,
+          totalContacts: stats.totalContacts,
+          fetchedAt: new Date(),
+        },
+      },
+    },
+  );
+  return stats;
+}
+
 module.exports = {
   getContactQuota,
   buildLeadFilter,
   estimateRecipients,
   assertSendAllowed,
   fetchListStats,
+  listMailchimpAudiences,
+  refreshAccountStatsCache,
 };

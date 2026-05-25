@@ -1,6 +1,10 @@
 const Lead = require('../models/Lead');
 const LeadConversionEvent = require('../models/LeadConversionEvent');
 const { subscriberHash } = require('../lib/mailchimpSubscriberHash');
+const { deleteMemberPermanent } = require('./mailchimpMemberSync');
+const { mailchimpRequest } = require('../lib/mailchimpClient');
+const { getMailchimpSettings } = require('../lib/mailchimpSettings');
+const MarketingCampaign = require('../models/MarketingCampaign');
 
 function serializeLead(doc) {
   if (!doc) return null;
@@ -47,23 +51,80 @@ async function recordConversionEvent(leadId, { fromStage, toStage, source, metad
   });
 }
 
-async function listLeads({ page = 1, limit = 50, country, language, consentStatus, conversionStage, q } = {}) {
+async function listLeads({
+  page = 1,
+  limit = 50,
+  country,
+  language,
+  consentStatus,
+  conversionStage,
+  importBatchId,
+  tag,
+  q,
+} = {}) {
   const cap = Math.min(200, Math.max(1, Number(limit) || 50));
   const skip = (Math.max(1, Number(page) || 1) - 1) * cap;
-  const filter = {};
-  if (country) filter.country = String(country).toUpperCase();
-  if (language) filter.language = String(language).toLowerCase();
-  if (consentStatus) filter.consentStatus = consentStatus;
-  if (conversionStage) filter.conversionStage = conversionStage;
-  if (q) {
-    const rx = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    filter.$or = [{ email: rx }, { firstName: rx }, { lastName: rx }, { company: rx }];
-  }
+  const filter = buildLeadFilter({
+    country,
+    language,
+    consentStatus,
+    conversionStage,
+    importBatchId,
+    tag,
+    q,
+  });
   const [rows, total] = await Promise.all([
     Lead.find(filter).sort({ updatedAt: -1 }).skip(skip).limit(cap).lean(),
     Lead.countDocuments(filter),
   ]);
   return { leads: rows.map(serializeLead), total, page: Math.max(1, Number(page) || 1), limit: cap };
+}
+
+async function getLeadCampaignActivity(lead) {
+  const settings = await getMailchimpSettings();
+  const activity = [];
+  const campaigns = await MarketingCampaign.find({
+    status: { $in: ['sent', 'sending'] },
+    ...(lead.lastCampaignId ? { _id: lead.lastCampaignId } : {}),
+  })
+    .sort({ sentAt: -1 })
+    .limit(10)
+    .lean();
+
+  for (const c of campaigns) {
+    activity.push({
+      campaignId: c._id.toString(),
+      title: c.title,
+      sentAt: c.sentAt ? new Date(c.sentAt).toISOString() : null,
+      tag: `campaign:${c._id}`,
+      included: (lead.tags || []).includes(`campaign:${c._id}`),
+    });
+  }
+
+  if (settings.enabled && settings.defaultListId && lead.email) {
+    try {
+      const hash = subscriberHash(lead.email);
+      const mc = await mailchimpRequest(
+        `/lists/${settings.defaultListId}/members/${hash}/activity`,
+      );
+      for (const row of (mc.activity || []).slice(0, 20)) {
+        activity.push({
+          type: row.activity_type || row.action,
+          title: row.campaign_title || row.title || row.email_type || 'Mailchimp',
+          at: row.created_at_timestamp
+            ? new Date(row.created_at_timestamp).toISOString()
+            : row.timestamp
+              ? new Date(row.timestamp).toISOString()
+              : null,
+          source: 'mailchimp',
+        });
+      }
+    } catch {
+      /* member activity optional */
+    }
+  }
+
+  return activity;
 }
 
 async function getLeadDetail(id) {
@@ -73,6 +134,7 @@ async function getLeadDetail(id) {
     .sort({ createdAt: -1 })
     .limit(50)
     .lean();
+  const campaignActivity = await getLeadCampaignActivity(lead);
   return {
     lead: serializeLead(lead),
     conversionTimeline: events.map((e) => ({
@@ -82,6 +144,7 @@ async function getLeadDetail(id) {
       source: e.source,
       at: e.createdAt ? new Date(e.createdAt).toISOString() : null,
     })),
+    campaignActivity,
   };
 }
 
@@ -161,17 +224,65 @@ async function updateLead(id, patch, { source = 'admin' } = {}) {
   return serializeLead(lead);
 }
 
-function buildLeadFilter({ country, language, consentStatus, conversionStage, q } = {}) {
+function buildLeadFilter({
+  country,
+  language,
+  consentStatus,
+  conversionStage,
+  importBatchId,
+  tag,
+  q,
+} = {}) {
   const filter = {};
   if (country) filter.country = String(country).toUpperCase();
   if (language) filter.language = String(language).toLowerCase();
   if (consentStatus) filter.consentStatus = consentStatus;
   if (conversionStage) filter.conversionStage = conversionStage;
+  if (importBatchId) filter.importBatchId = importBatchId;
+  if (tag) filter.tags = String(tag).trim();
   if (q) {
     const rx = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     filter.$or = [{ email: rx }, { firstName: rx }, { lastName: rx }, { company: rx }];
   }
   return filter;
+}
+
+async function deleteLeadPermanent(id) {
+  const lead = await Lead.findById(id);
+  if (!lead) return null;
+  const emailBefore = lead.email;
+  try {
+    await deleteMemberPermanent(emailBefore);
+  } catch {
+    /* proceed with local anonymization */
+  }
+  const anonId = lead._id.toString().slice(-8);
+  lead.email = `deleted-${anonId}@anonymized.linkbio`;
+  lead.firstName = '';
+  lead.lastName = '';
+  lead.fullName = '';
+  lead.phone = '';
+  lead.company = '';
+  lead.country = '';
+  lead.language = '';
+  lead.city = '';
+  lead.region = '';
+  lead.tags = ['gdpr_deleted'];
+  lead.customFields = {};
+  lead.consentStatus = 'opted_out';
+  lead.conversionStage = 'churned';
+  lead.sourceLabel = 'gdpr_erasure';
+  lead.optedOutAt = new Date();
+  lead.mailchimpStatus = '';
+  lead.mailchimpSyncError = null;
+  await lead.save();
+  await recordConversionEvent(lead._id, {
+    fromStage: '',
+    toStage: 'churned',
+    source: 'gdpr_delete',
+    metadata: { previousEmailHash: subscriberHash(emailBefore) },
+  });
+  return serializeLead(lead);
 }
 
 async function createLead(data, { source = 'admin' } = {}) {
@@ -253,6 +364,8 @@ module.exports = {
   bulkUpdateLeads,
   exportLeadsCsv,
   archiveLead,
+  deleteLeadPermanent,
   buildLeadFilter,
   recordConversionEvent,
+  getLeadCampaignActivity,
 };

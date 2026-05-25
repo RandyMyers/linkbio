@@ -13,7 +13,9 @@
     "migrate:blocks:dry": "node scripts/migrate-profile-blocks.js --dry-run",
     "test:proration": "node scripts/testSubscriptionProration.js",
     "backfill:subscriptions": "node scripts/backfillSubscriptionEvents.js",
-    "backfill:subscriptions:dry": "node scripts/backfillSubscriptionEvents.js --dry-run"
+    "backfill:subscriptions:dry": "node scripts/backfillSubscriptionEvents.js --dry-run",
+    "repair:billing": "node scripts/repairUserBillingData.js",
+    "repair:billing:dry": "node scripts/repairUserBillingData.js --dry-run"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

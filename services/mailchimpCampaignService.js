@@ -28,6 +28,7 @@ function serializeCampaign(doc) {
     plainText: d.plainText || '',
     sendChecklist: d.sendChecklist || null,
     lastReportSyncAt: d.lastReportSyncAt ? new Date(d.lastReportSyncAt).toISOString() : null,
+    campaignGroupId: d.campaignGroupId || null,
     createdAt: d.createdAt ? new Date(d.createdAt).toISOString() : null,
     updatedAt: d.updatedAt ? new Date(d.updatedAt).toISOString() : null,
   };
@@ -141,6 +142,7 @@ async function createCampaign(input, { userId } = {}) {
     recipientBreakdown: { byCountry: estimate.byCountry, byLanguage: estimate.byLanguage },
     htmlContent: input.htmlContent || '',
     plainText: input.plainText || '',
+    campaignGroupId: input.campaignGroupId || null,
     createdBy: userId || null,
   });
 
@@ -153,7 +155,7 @@ async function updateCampaign(id, patch) {
 
   const fields = [
     'title', 'subject', 'locale', 'targetLanguages', 'targetCountries',
-    'targetConversionStages', 'fromName', 'replyTo', 'htmlContent', 'plainText',
+    'targetConversionStages', 'fromName', 'replyTo', 'htmlContent', 'plainText', 'campaignGroupId',
   ];
   for (const key of fields) {
     if (patch[key] !== undefined) campaign[key] = patch[key];
@@ -358,6 +360,45 @@ async function deleteCampaign(id) {
   return true;
 }
 
+async function replicateCampaign(id) {
+  const campaign = await MarketingCampaign.findById(id);
+  if (!campaign?.mailchimpCampaignId) return null;
+  const replicated = await mailchimpRequest(`/campaigns/${campaign.mailchimpCampaignId}/actions/replicate`, {
+    method: 'POST',
+  });
+  const copy = await MarketingCampaign.create({
+    title: `${campaign.title} (copy)`,
+    subject: campaign.subject,
+    locale: campaign.locale,
+    targetLanguages: campaign.targetLanguages || [],
+    targetCountries: campaign.targetCountries || [],
+    targetConversionStages: campaign.targetConversionStages || [],
+    fromName: campaign.fromName,
+    replyTo: campaign.replyTo,
+    htmlContent: campaign.htmlContent,
+    plainText: campaign.plainText,
+    status: 'draft',
+    mailchimpCampaignId: replicated.id,
+    mailchimpListId: campaign.mailchimpListId,
+    campaignGroupId: campaign.campaignGroupId,
+  });
+  return serializeCampaign(copy);
+}
+
+async function cancelCampaignSend(id) {
+  const campaign = await MarketingCampaign.findById(id);
+  if (!campaign?.mailchimpCampaignId) return null;
+  if (campaign.status !== 'sending') {
+    const err = new Error('Campaign is not currently sending.');
+    err.statusCode = 400;
+    throw err;
+  }
+  await mailchimpRequest(`/campaigns/${campaign.mailchimpCampaignId}/actions/cancel-send`, { method: 'POST' });
+  campaign.status = 'canceled';
+  await campaign.save();
+  return serializeCampaign(campaign);
+}
+
 module.exports = {
   serializeCampaign,
   listCampaigns,
@@ -373,4 +414,6 @@ module.exports = {
   deleteCampaign,
   sendCampaignTest,
   buildSegmentOpts,
+  replicateCampaign,
+  cancelCampaignSend,
 };

@@ -7,6 +7,8 @@ const router = express.Router();
 router.get('/billing/quote', billingController.getQuote);
 router.get('/billing/subscription', requireAuth, billingController.getSubscription);
 router.get('/billing/subscription/history', requireAuth, billingController.getSubscriptionHistory);
+router.get('/billing/subscription/events', requireAuth, billingController.getSubscriptionEvents);
+router.get('/billing/payments/history', requireAuth, billingController.getPaymentHistory);
 router.post('/billing/subscription/activate-zero', requireAuth, billingController.activateZeroAmountCheckout);
 router.post('/billing/subscription/quote', requireAuth, billingController.postSubscriptionQuote);
 router.post('/billing/subscription/schedule-downgrade', requireAuth, billingController.scheduleSubscriptionDowngrade);

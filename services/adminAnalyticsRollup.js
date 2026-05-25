@@ -54,6 +54,7 @@ async function overviewForRange(rangeDays = 30) {
     clicksRange,
     pendingBank,
     cryptoWaiting,
+    gatewayPending,
     paidCryptoRange,
     eventDaily,
     signupDaily,
@@ -70,6 +71,10 @@ async function overviewForRange(rangeDays = 30) {
     PaymentRequest.countDocuments({ status: 'pending' }),
     CryptoPayment.countDocuments({
       paymentStatus: { $nin: ['finished', 'confirmed'] },
+      type: 'subscription',
+    }),
+    GatewayPayment.countDocuments({
+      paymentStatus: 'pending',
       type: 'subscription',
     }),
     CryptoPayment.countDocuments({
@@ -138,6 +143,7 @@ async function overviewForRange(rangeDays = 30) {
     billing: {
       pendingBankRequests: pendingBank,
       cryptoWaiting,
+      gatewayPending,
       paidCryptoSubscriptionsInRange: paidCryptoRange,
     },
     series: {

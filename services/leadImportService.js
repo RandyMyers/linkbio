@@ -280,25 +280,39 @@ async function createBatchFromUpload({ name, filename, headers, columnMapping, u
 }
 
 async function listMappingTemplates() {
-  const rows = await LeadImportMappingTemplate.find().sort({ updatedAt: -1 }).limit(50).lean();
+  const rows = await LeadImportMappingTemplate.find().sort({ isDefault: -1, updatedAt: -1 }).limit(50).lean();
   return rows.map((t) => ({
     id: t._id.toString(),
     name: t.name,
     columnMapping: t.columnMapping,
     defaultTags: t.defaultTags || [],
     defaultConsentStatus: t.defaultConsentStatus,
+    isDefault: !!t.isDefault,
   }));
 }
 
-async function saveMappingTemplate({ name, columnMapping, defaultTags, defaultConsentStatus, userId }) {
+async function clearDefaultTemplate() {
+  await LeadImportMappingTemplate.updateMany({ isDefault: true }, { $set: { isDefault: false } });
+}
+
+async function saveMappingTemplate({
+  name,
+  columnMapping,
+  defaultTags,
+  defaultConsentStatus,
+  userId,
+  isDefault,
+}) {
+  if (isDefault) await clearDefaultTemplate();
   const doc = await LeadImportMappingTemplate.create({
     name,
     columnMapping,
     defaultTags: defaultTags || [],
     defaultConsentStatus: defaultConsentStatus || 'opted_in',
     createdBy: userId || null,
+    isDefault: !!isDefault,
   });
-  return { id: doc._id.toString(), name: doc.name };
+  return { id: doc._id.toString(), name: doc.name, isDefault: !!doc.isDefault };
 }
 
 async function updateMappingTemplate(id, patch) {
@@ -308,6 +322,12 @@ async function updateMappingTemplate(id, patch) {
   if (patch.columnMapping !== undefined) doc.columnMapping = patch.columnMapping;
   if (patch.defaultTags !== undefined) doc.defaultTags = patch.defaultTags || [];
   if (patch.defaultConsentStatus !== undefined) doc.defaultConsentStatus = patch.defaultConsentStatus;
+  if (patch.isDefault === true) {
+    await clearDefaultTemplate();
+    doc.isDefault = true;
+  } else if (patch.isDefault === false) {
+    doc.isDefault = false;
+  }
   await doc.save();
   return {
     id: doc._id.toString(),
@@ -315,6 +335,7 @@ async function updateMappingTemplate(id, patch) {
     columnMapping: doc.columnMapping,
     defaultTags: doc.defaultTags || [],
     defaultConsentStatus: doc.defaultConsentStatus,
+    isDefault: !!doc.isDefault,
   };
 }
 

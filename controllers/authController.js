@@ -55,6 +55,9 @@ exports.register = asyncHandler(async (req, res) => {
     await user.save({ session });
     await session.commitTransaction();
 
+    const { syncLeadFromSignup } = require('../services/marketingLeadSync');
+    syncLeadFromSignup({ email, name: name || 'Your Name', subscriptionPlan: 'free' }).catch(() => {});
+
     const token = signUserToken(user._id.toString());
     setAuthCookie(res, token);
     const profilesPayload = await profilesPayloadForUser(user);

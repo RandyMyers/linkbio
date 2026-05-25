@@ -10,6 +10,7 @@ const leadImportMappingTemplateSchema = new mongoose.Schema(
       enum: ['opted_in', 'opted_out', 'pending'],
       default: 'opted_in',
     },
+    isDefault: { type: Boolean, default: false },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true },
